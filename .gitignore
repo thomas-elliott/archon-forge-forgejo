@@ -1,0 +1,9 @@
+node_modules/
+dist/
+
+# Private to this machine: the working spec, the Archon source checkout,
+# and any notes that name a real host, user or setup. Never commit these.
+local/
+CLAUDE.local.md
+.env
+.env.*

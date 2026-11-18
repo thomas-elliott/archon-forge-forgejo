@@ -1,0 +1,3 @@
+[tools]
+# Match the Bun version Archon v0.14.0 builds with (its package.json "engines").
+bun = "1.4.2"
