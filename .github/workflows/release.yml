@@ -1,0 +1,35 @@
+# Builds the plugin for every platform and attaches the executables to a GitHub release
+# when a version tag such as v0.1.0 is pushed.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2 # the version in mise.toml
+      # The protocol schemas are imported from Archon's source; see README "Develop".
+      - run: git clone --depth 1 --branch v0.14.0 https://github.com/coleam00/Archon.git local/archon
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run build
+      - name: Name each executable after its platform
+        run: |
+          mkdir release
+          for dir in dist/*/; do
+            platform=$(basename "$dir")
+            cp "$dir/archon-forge-forgejo" "release/archon-forge-forgejo-$platform"
+          done
+          cd release && sha256sum * > SHA256SUMS
+      - run: gh release create "$GITHUB_REF_NAME" release/* --verify-tag --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

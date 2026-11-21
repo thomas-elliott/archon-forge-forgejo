@@ -4,8 +4,9 @@ A forge plugin that lets [Archon](https://github.com/coleam00/Archon) read and w
 comments and pull requests on a [Forgejo](https://forgejo.org) instance, merge pull requests, and
 read its commit statuses.
 
-Status: in development. Targets Archon v0.14.0 (forge protocol 1) and Forgejo's `/api/v1`
-(Forgejo 17, Gitea 1.22 API).
+Status: in development. Built for Archon v0.14.0 (forge protocol 1) and Forgejo's `/api/v1`. It has
+been tested against a single instance, Forgejo 17.0.2 (Gitea 1.22 API). Other Forgejo versions and
+Gitea are untested; older ones may lack API fields it relies on, such as a pull request's `draft`.
 
 ## Operations
 
@@ -25,7 +26,9 @@ Forgejo differs from GitHub in ways a caller can see:
   looks up a name among the repository's labels and then the organization's, so the plugin then
   removes the label by name. It never replaces the item's whole label set.
 - Forgejo marks a draft pull request with a title prefix. `pr.draft` adds `WIP: ` to the title and
-  `pr.ready` removes it.
+  `pr.ready` removes it. These are Forgejo's default prefixes, `WIP:` and `[WIP]`. An instance that
+  sets other prefixes in `WORK_IN_PROGRESS_PREFIXES` must keep `WIP:` among them, or `pr.draft`
+  fails its read-back and `pr.create` cannot open a draft.
 - Forgejo records no reason when an issue is closed, so `workitem.close` records `not_planned` and
   `duplicate` as the labels `closed/not_planned` and `closed/duplicate`. Create them first with
   `repo.label.ensure`; a close whose label is missing is refused. An issue with neither label reads
@@ -47,17 +50,21 @@ Forgejo differs from GitHub in ways a caller can see:
 
 ## Install
 
-Build the executable, copy it into Archon's plugins directory and make it executable. Copy it
-under a temporary name and then move it into place, so that Archon never runs a half-copied file:
+Download the executable for your platform from this repository's Releases page:
+`archon-forge-forgejo-linux-x64`, `-linux-arm64`, `-darwin-arm64` or `-darwin-x64`. `SHA256SUMS`
+lists their checksums. To build it yourself instead, see [Develop](#develop).
+
+Copy it into Archon's plugins directory under a temporary name, make it executable, then move it
+into place, so that Archon never runs a half-copied file:
 
 ```sh
-bun run build:linux-x64        # or build:darwin-arm64
-cp dist/linux-x64/archon-forge-forgejo ~/.archon/plugins/archon-forge-forgejo.new
+cp archon-forge-forgejo-linux-x64 ~/.archon/plugins/archon-forge-forgejo.new
 chmod +x ~/.archon/plugins/archon-forge-forgejo.new
 mv ~/.archon/plugins/archon-forge-forgejo.new ~/.archon/plugins/archon-forge-forgejo
 ```
 
-Restart Archon afterwards so that it reads the plugin's new metadata.
+Restart Archon afterwards so that it reads the plugin's new metadata. Upgrading the plugin is the
+same steps with the new release.
 
 The plugin claims no host, because every Forgejo is self-hosted. Claim yours in Archon's config,
 `~/.archon/config.yaml`. Without this entry the plugin serves no host:
@@ -82,6 +89,21 @@ It must be a bare `http(s)://host[:port]`, and it is used only when its host and
 repository's. Archon v0.14.0 does not pass `FORGEJO_URL` to plugins, so under Archon every call
 uses HTTPS.
 
+## When Archon is upgraded
+
+Each release is built against one version of Archon's forge protocol, from Archon v0.14.0. Archon
+runs `archon-forge-forgejo metadata` to learn which protocol and operations a plugin supports, and
+does not use a plugin whose protocol it does not speak. After upgrading Archon, check that it still
+lists the plugin's operations:
+
+```sh
+archon forge metadata --data '{"host":"forgejo.example.com"}' --json
+```
+
+If it does not, or a release of Archon changes the forge protocol, the plugin needs rebuilding
+against the new Archon source: change the Archon version in the clone step below, in `CLAUDE.md`
+and in `.github/workflows/release.yml`, then fix whatever the type check and tests report.
+
 ## Develop
 
 The protocol schemas and Archon's conformance kit are imported from a checkout of Archon
@@ -91,8 +113,12 @@ The protocol schemas and Archon's conformance kit are imported from a checkout o
 git clone --depth 1 --branch v0.14.0 https://github.com/coleam00/Archon.git local/archon
 bun install
 bun run check      # format and lint, typecheck, tests
-bun run build      # dist/linux-x64 and dist/darwin-arm64
+bun run build      # dist/<platform>/archon-forge-forgejo for each of the four platforms
 ```
+
+Pushing a version tag such as `v0.1.0` runs `.github/workflows/release.yml`, which runs the checks,
+builds every platform and publishes a GitHub release with the executables attached. Set the same
+version in `package.json` first: the plugin reports it in its metadata.
 
 The tests run against an in-memory Forgejo. `test/live.test.ts` runs against a real instance
 instead, and skips unless all of these are set:

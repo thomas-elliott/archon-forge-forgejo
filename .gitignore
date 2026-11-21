@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# Specs written while building this plugin; they refer to a private working spec.
+/docs/specs/
 
 # Private to this machine: the working spec, the Archon source checkout,
 # and any notes that name a real host, user or setup. Never commit these.
