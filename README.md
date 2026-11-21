@@ -50,7 +50,8 @@ Forgejo differs from GitHub in ways a caller can see:
 
 ## Install
 
-Download the executable for your platform from this repository's Releases page:
+Download the executable for your platform from the
+[latest release](https://github.com/thomas-elliott/archon-forge-forgejo/releases/latest):
 `archon-forge-forgejo-linux-x64`, `-linux-arm64`, `-darwin-arm64` or `-darwin-x64`. `SHA256SUMS`
 lists their checksums. To build it yourself instead, see [Develop](#develop).
 

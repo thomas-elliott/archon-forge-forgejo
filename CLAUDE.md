@@ -4,10 +4,11 @@ An Archon forge plugin for Forgejo: an executable that speaks Archon's forge pro
 
 ## Public repository
 
-This repository is public. Do not commit personal or site-specific details: real hostnames,
-usernames, repository names, tokens, or a description of any particular deployment. Use
-placeholders such as `forgejo.example.com` and `owner/repo` in code, tests, docs and commit
-messages. Private material lives in `local/` and `CLAUDE.local.md`, which git ignores.
+This repository is public. Do not commit a personal email address, the address of any real server
+or private network, tokens, or anything specific to one deployment that would make the plugin
+harder for someone else to pick up and use. Naming the repository's own GitHub account, as in its
+URL, is fine. Use placeholders such as `forgejo.example.com` and `owner/repo` in code, tests, docs
+and commit messages. Private material lives in `local/` and `CLAUDE.local.md`, which git ignores.
 
 ## Tooling
 
