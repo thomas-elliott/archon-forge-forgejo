@@ -1,0 +1,3 @@
+# Only this repository's tests: local/archon holds the Archon checkout and its own suites.
+[test]
+root = "test"

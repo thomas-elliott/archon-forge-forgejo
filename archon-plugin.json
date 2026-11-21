@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "kind": "forge",
+  "name": "forge-forgejo",
+  "description": "Read and write Forgejo issues, labels, comments, pull requests and commit statuses for Archon.",
+  "executable": "archon-forge-forgejo"
+}

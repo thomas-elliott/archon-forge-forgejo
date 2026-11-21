@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022"],
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "types": ["bun"],
+    // The protocol schemas and conformance kit come from the gitignored Archon checkout
+    // (see CLAUDE.md). The compiled binary bundles what it uses.
+    "paths": {
+      "@archon/forge": ["./local/archon/packages/forge/src/index.ts"],
+      "@archon/forge/*": ["./local/archon/packages/forge/src/*"]
+    }
+  },
+  "include": ["src", "test"]
+}
