@@ -1,8 +1,8 @@
 # archon-forge-forgejo
 
 A forge plugin that lets [Archon](https://github.com/coleam00/Archon) read and write issues, labels,
-comments and pull requests on a [Forgejo](https://forgejo.org) instance, merge pull requests, and
-read its commit statuses.
+comments and pull requests on a [Forgejo](https://forgejo.org) instance, merge pull requests, read
+its commit statuses, and re-run failed [Woodpecker](https://woodpecker-ci.org) pipelines.
 
 Status: in development. Built for Archon v0.14.0 (forge protocol 1) and Forgejo's `/api/v1`. It has
 been tested against a single instance, Forgejo 17.0.2 (Gitea 1.22 API). Other Forgejo versions and
@@ -13,7 +13,11 @@ Gitea are untested; older ones may lack API fields it relies on, such as a pull 
 `resolve`, `workitem.list`, `workitem.view`, `workitem.label.add`, `workitem.label.remove`,
 `workitem.comment.upsert`, `workitem.comments`, `workitem.create`, `workitem.edit-body`,
 `workitem.close`, `repo.labels.list`, `repo.label.ensure`, `comment.upsert`, `pr.view`, `pr.create`,
-`pr.edit-body`, `pr.ready`, `pr.draft`, `pr.merge`, `checks.state` and `checks.commit`.
+`pr.edit-body`, `pr.ready`, `pr.draft`, `pr.merge`, `pr.merge-state`, `pr.files`, `pr.threads`,
+`pr.thread.reply`, `repo.file`, `checks.state`, `checks.commit` and `checks.rerun`.
+
+It does not serve `pr.thread.resolve`, because Forgejo's API cannot resolve a review conversation.
+Archon's SDLC pack needs all three thread operations, so its deliver workflow refuses this plugin.
 
 Forgejo differs from GitHub in ways a caller can see:
 
@@ -47,6 +51,16 @@ Forgejo differs from GitHub in ways a caller can see:
 - A merge result's `landed.tree` is always `null`. Forgejo's commit API returns the commit's own
   id in place of its tree's, so the plugin does not report it. `landed.parents` is `null` when the
   merge commit cannot be read.
+- `pr.merge-state` reports `mergeable` as `clean` or `unknown`, never `conflict`. Forgejo reports a
+  pull request as not mergeable both when it conflicts and while Forgejo is still checking it.
+- `pr.files` takes each file's patch from the pull request's diff, because Forgejo's file list has
+  none. A file whose path git quotes, such as one with non-ASCII characters, has no patch.
+- A review thread is what Forgejo shows as a conversation: the comments of one review on one line.
+  Its id is the id of its first comment. A thread is resolved when Forgejo names who resolved it,
+  and `outdated` is always `false`, because Forgejo's API does not say.
+- `checks.state` and `checks.commit` mark a status that links to a Woodpecker pipeline as one that
+  can be re-run. `checks.rerun` restarts that pipeline as a new one, so its passing workflows run
+  again too. The new pipeline's number is the check's next attempt.
 
 ## Install
 
@@ -90,6 +104,18 @@ It must be a bare `http(s)://host[:port]`, and it is used only when its host and
 repository's. Archon v0.14.0 does not pass `FORGEJO_URL` to plugins, so under Archon every call
 uses HTTPS.
 
+`checks.rerun` also needs Woodpecker's address and a Woodpecker token. Archon passes a plugin no
+variables besides its token, so the plugin reads them from
+`~/.config/archon-forge-forgejo/woodpecker.json` in the home directory of the user Archon runs as:
+
+```json
+{ "url": "https://ci.example.com", "token": "<Woodpecker personal access token>" }
+```
+
+Make the file readable only by that user, for example with `chmod 600`. The plugin sends the token
+only to that address, and re-runs only checks whose status links there. The token's user needs
+permission to restart pipelines in the repository.
+
 ## When Archon is upgraded
 
 Each release is built against one version of Archon's forge protocol, from Archon v0.14.0. Archon
@@ -131,7 +157,7 @@ instead, and skips unless all of these are set:
 | `FORGEJO_LIVE_TOKEN` | A token that can write that repository's code, issues and labels |
 
 Each run creates the `status/*` and `closed/duplicate` labels if they are missing, two issues, one
-branch and one pull request. Its last check merges the pull request, which adds one file under
+branch and one pull request, with one review comment and a reply on it. Its last check merges the pull request, which adds one file under
 `archon-live/` to the default branch, so the token's user must be able to merge there without
 approvals. It closes the issues when it finishes, and the pull request and branch too if the merge
 did not happen.

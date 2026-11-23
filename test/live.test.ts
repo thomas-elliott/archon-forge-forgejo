@@ -244,6 +244,59 @@ describe.skipIf(!live)('live Forgejo', () => {
     expect(await view()).toMatchObject({ body });
   });
 
+  test("the pull request's files, merge state, file text and review threads read back", async () => {
+    const head = state.head ?? '';
+    const file = `archon-live/${run}.txt`;
+    expect(value(await call({ op: 'pr.files', ref: prRef() }))).toEqual({
+      ref: prRef(),
+      head_revision: head,
+      files: [
+        {
+          path: file,
+          previous_path: null,
+          status: 'added',
+          patch: `@@ -0,0 +1 @@\n+live check ${run}`,
+        },
+      ],
+    });
+    expect(value(await call({ op: 'repo.file', repo, path: file, revision: head })).text).toBe(
+      `live check ${run}\n`
+    );
+    const mergeState = value(await call({ op: 'pr.merge-state', ref: prRef() }));
+    expect(mergeState).toMatchObject({
+      head_revision: head,
+      default_branch: state.base,
+      behind: 0,
+    });
+    expect(['clean', 'unknown']).toContain(mergeState.mergeable as string);
+
+    await forgejo('POST', `/pulls/${String(state.pr)}/reviews`, {
+      event: 'COMMENT',
+      body: '',
+      comments: [{ path: file, new_position: 1, body: 'Live thread' }],
+    });
+    const threads = async () =>
+      value(await call({ op: 'pr.threads', ref: prRef() })).threads as {
+        id: string;
+        resolved: boolean;
+        path: string;
+        line: number | null;
+        comments: { body: string }[];
+      }[];
+    const [opened] = await threads();
+    expect(opened).toMatchObject({ resolved: false, path: file, line: 1 });
+    const reply = await call({
+      op: 'pr.thread.reply',
+      ref: prRef(),
+      thread: opened.id,
+      body: 'Live reply',
+    });
+    expect(value(reply)).toMatchObject({ outcome: 'applied', thread: opened.id });
+    expect((await threads()).map(thread => thread.comments.map(comment => comment.body))).toEqual([
+      ['Live thread', 'Live reply'],
+    ]);
+  });
+
   test('checks report commit statuses, latest per context', async () => {
     const head = state.head ?? '';
     const none = value(

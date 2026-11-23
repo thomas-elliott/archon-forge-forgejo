@@ -21,11 +21,16 @@ let counter = 0;
  * Run one operation against the fake Forgejo and check the response as the Archon
  * host does: it must parse, and it must answer the request that was sent.
  */
-export async function call(fake: FakeForgejo, request: Request, fetch?: Fetch) {
+export async function call(
+  fake: FakeForgejo,
+  request: Request,
+  fetch?: Fetch,
+  woodpeckerConfig?: string
+) {
   // Parsed as the executable parses stdin, so schema transforms apply.
   const sent = forgeRequestSchema.parse({ operationId: `op-${String(++counter)}`, ...request });
   const response = forgeResponseSchema.parse(
-    await handleOperation(sent, { token: TOKEN, forgejoUrl: fake.origin, fetch })
+    await handleOperation(sent, { token: TOKEN, forgejoUrl: fake.origin, fetch, woodpeckerConfig })
   );
   expect(response.operationId).toBe(sent.operationId);
   expect(matchesForgeOperationResponse(sent, response, metadata, fake.host)).toBe(true);

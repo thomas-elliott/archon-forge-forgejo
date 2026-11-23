@@ -33,13 +33,18 @@ export function invalidRequest(message: string): ForgejoError {
   return new ForgejoError({ kind: 'invalid_request', message }, true);
 }
 
-/**
- * Parse `FORGEJO_URL`. Only a bare `http(s)://host[:port]` is accepted, because a
- * path, query or credential in it would silently change every API URL built from it.
- */
+/** Parse `FORGEJO_URL`, which may be unset. */
 export function parseOriginOverride(value: string | undefined): URL | undefined {
   if (value === undefined || value === '') return undefined;
-  const message = 'FORGEJO_URL must be a bare http(s)://host[:port] origin';
+  return parseOrigin(value, 'FORGEJO_URL');
+}
+
+/**
+ * Parse a server's origin. Only a bare `http(s)://host[:port]` is accepted, because a
+ * path, query or credential in it would silently change every API URL built from it.
+ */
+export function parseOrigin(value: string, name: string): URL {
+  const message = `${name} must be a bare http(s)://host[:port] origin`;
   let url: URL;
   try {
     url = new URL(value);
@@ -110,7 +115,11 @@ function branchPath(branch: string): string {
 
 const errorBodySchema = z.object({ message: z.string().min(1) });
 
-async function responseError(response: Response): Promise<ForgejoError> {
+/** A failed answer from Forgejo, or from Woodpecker when the plugin re-runs CI. */
+export async function responseError(
+  response: Response,
+  server: 'Forgejo' | 'Woodpecker' = 'Forgejo'
+): Promise<ForgejoError> {
   const status = response.status;
   let reason = '';
   try {
@@ -128,7 +137,7 @@ async function responseError(response: Response): Promise<ForgejoError> {
           ? 'conflict'
           : 'forge_error';
   return new ForgejoError(
-    { kind, message: `Forgejo API request failed with HTTP ${String(status)}${reason}`, status },
+    { kind, message: `${server} API request failed with HTTP ${String(status)}${reason}`, status },
     status >= 400 && status < 500
   );
 }
@@ -239,6 +248,12 @@ export function urlNamesItem(url: string, repo: RepoRef, number: number): boolea
   return [`${item}/issues/${String(number)}`, `${item}/pulls/${String(number)}`].some(suffix =>
     path.endsWith(suffix)
   );
+}
+
+const repositorySchema = z.object({ default_branch: z.string().min(1) });
+
+export async function defaultBranch(api: ForgejoApi, repo: RepoRef): Promise<string> {
+  return (await request(api, repoUrl(api, repo), repositorySchema)).default_branch;
 }
 
 const branchSchema = z.object({ commit: z.object({ id: z.string().min(1) }) });

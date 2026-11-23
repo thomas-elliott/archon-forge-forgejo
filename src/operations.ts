@@ -13,11 +13,15 @@ import { errorDetail, type Fetch, type ForgejoApi, parseOriginOverride } from '.
 import { checksCommit, checksState } from './checks';
 import { closeWorkItem } from './close';
 import { listWorkItemComments, upsertComment } from './comments';
+import { pullFiles, repoFile } from './files';
 import { addLabel, ensureLabel, listRepoLabels, removeLabel } from './labels';
 import { mergePull } from './merge';
+import { pullMergeState } from './merge-state';
 import { refused, runMutation, type Submit } from './outcome';
 import { createPull, editPullBody, setDraftState, viewPull } from './pulls';
 import { parseRemote } from './remote';
+import { rerunChecks } from './rerun';
+import { listThreads, replyOnThread } from './threads';
 import { createWorkItem, editWorkItemBody, listWorkItems, viewWorkItem } from './workitems';
 
 type ReadOp = Exclude<ForgeRequest['op'], 'resolve' | ForgeMutationRequest['op']>;
@@ -29,7 +33,8 @@ type MutationOp = ForgeMutationRequest['op'];
 type MutationHandler<Op extends MutationOp> = (
   request: Extract<ForgeMutationRequest, { op: Op }>,
   api: ForgejoApi,
-  submit: Submit
+  submit: Submit,
+  woodpeckerConfig: string | undefined
 ) => Promise<ForgeResponse>;
 
 /** The reads this plugin serves. Its keys are advertised as capabilities. */
@@ -41,6 +46,10 @@ const reads: { [Op in ReadOp]?: ReadHandler<Op> } = {
   'pr.view': viewPull,
   'checks.state': checksState,
   'checks.commit': checksCommit,
+  'pr.merge-state': pullMergeState,
+  'pr.files': pullFiles,
+  'repo.file': repoFile,
+  'pr.threads': listThreads,
 };
 
 /** The writes this plugin serves. Its keys are advertised as capabilities. */
@@ -55,6 +64,8 @@ const writes: { [Op in MutationOp]?: MutationHandler<Op> } = {
   'pr.ready': setDraftState,
   'pr.draft': setDraftState,
   'pr.merge': mergePull,
+  'checks.rerun': rerunChecks,
+  'pr.thread.reply': replyOnThread,
   'workitem.create': createWorkItem,
   'workitem.edit-body': editWorkItemBody,
   'workitem.close': closeWorkItem,
@@ -78,6 +89,8 @@ export interface OperationOptions {
   readonly token: string | undefined;
   /** The raw `FORGEJO_URL` value, validated before any API call. */
   readonly forgejoUrl: string | undefined;
+  /** The file holding Woodpecker's url and token, read only to re-run checks. */
+  readonly woodpeckerConfig?: string;
   readonly fetch?: Fetch;
 }
 
@@ -137,7 +150,9 @@ export async function handleOperation(
     if (write) {
       const mutation = request as ForgeMutationRequest;
       const handler = write as MutationHandler<MutationOp>;
-      return await runMutation(mutation, submit => handler(mutation, api, submit));
+      return await runMutation(mutation, submit =>
+        handler(mutation, api, submit, options.woodpeckerConfig)
+      );
     }
     return await (read as ReadHandler<ReadOp>)(
       request as Extract<ForgeRequest, { op: ReadOp }>,

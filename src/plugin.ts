@@ -1,10 +1,12 @@
 #!/usr/bin/env bun
+
 /**
  * The executable Archon runs: `archon-forge-forgejo metadata` prints the metadata,
  * and `archon-forge-forgejo op <operation>` answers one JSON request on stdin with
  * one JSON response on stdout. Exit 0 carries a success, exit 1 a failure.
  */
 
+import { join } from 'node:path';
 import { type ForgeResponse, forgeRequestSchema } from '@archon/forge/operations';
 import { handleOperation, metadata } from './operations';
 
@@ -48,9 +50,12 @@ async function runPlugin(args: readonly string[]): Promise<number> {
   }
 
   // The token comes from this variable only, never from arguments, the request or a remote.
+  // Archon passes HOME through, but no other variable that could carry Woodpecker's token.
+  const home = process.env.HOME;
   const response = await handleOperation(request.data, {
     token: process.env.ARCHON_FORGE_TOKEN,
     forgejoUrl: process.env.FORGEJO_URL,
+    woodpeckerConfig: home ? join(home, '.config/archon-forge-forgejo/woodpecker.json') : undefined,
   });
   write(response);
   return response.ok ? 0 : 1;

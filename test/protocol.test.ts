@@ -54,6 +54,12 @@ describe('executable', () => {
         'workitem.create',
         'checks.state',
         'checks.commit',
+        'checks.rerun',
+        'pr.merge-state',
+        'pr.files',
+        'repo.file',
+        'pr.threads',
+        'pr.thread.reply',
       ].sort()
     );
   });

@@ -26,6 +26,10 @@ interface Pull {
   mergeCommit?: string;
   /** False when Forgejo has found a conflict with the base branch. */
   mergeable?: boolean;
+  /** The files listing, as Forgejo's `ChangedFile`. */
+  files?: { filename: string; status: string; previous_filename?: string }[];
+  /** The text the pull request's `.diff` answers with. */
+  diff?: string;
 }
 interface Issue {
   number: number;
@@ -46,6 +50,24 @@ interface Status {
   id: number;
   context: string;
   status: string;
+  target_url: string;
+}
+export interface ReviewComment {
+  id: number;
+  body: string;
+  path: string;
+  /** The line on the new side, or 0. */
+  position: number;
+  /** The line on the old side, or 0. */
+  original_position: number;
+  extra_lines_count: number;
+  resolved: boolean;
+}
+interface Review {
+  id: number;
+  issue: number;
+  state: string;
+  comments: ReviewComment[];
 }
 export interface RecordedRequest {
   method: string;
@@ -81,6 +103,9 @@ export class FakeForgejo {
   mergeRefusal: { status: number; message: string } | null = null;
   /** Commits a merge created, by id. */
   commits = new Map<string, { parents: string[] }>();
+  reviews: Review[] = [];
+  /** File contents by `revision:path`. */
+  rawFiles = new Map<string, string | Uint8Array>();
   /** Forgejo's answer when deleting the head branch after a merge fails, such as a protected branch. */
   branchDeletionRefusal: { status: number; message: string } | null = null;
   private nextId = 100;
@@ -150,10 +175,38 @@ export class FakeForgejo {
     this.comments.push(comment);
     return comment;
   }
-  addStatus(sha: string, context: string, status: string): void {
+  addReview(issue: number, state = 'COMMENT'): Review {
+    const review = { id: this.nextId++, issue, state, comments: [] };
+    this.reviews.push(review);
+    return review;
+  }
+  addReviewComment(
+    review: Review,
+    comment: Partial<Omit<ReviewComment, 'id'>> & { path: string }
+  ): ReviewComment {
+    const added = {
+      id: this.nextId++,
+      body: 'Please rename this.',
+      position: 0,
+      original_position: 0,
+      extra_lines_count: 0,
+      resolved: false,
+      ...comment,
+    };
+    review.comments.push(added);
+    return added;
+  }
+  addStatus(
+    sha: string,
+    context: string,
+    status: string,
+    targetUrl = 'https://ci.example.com/pipeline/1'
+  ): Status {
     const list = this.statuses.get(sha) ?? [];
-    list.push({ id: list.length + 1, context, status });
+    const added = { id: list.length + 1, context, status, target_url: targetUrl };
+    list.push(added);
     this.statuses.set(sha, list);
+    return added;
   }
 
   private isDraft(title: string): boolean {
@@ -219,6 +272,16 @@ export class FakeForgejo {
       head: { label: pull.head, ref: headRef, sha: pull.headSha, repo_id: 1, repo },
       created_at: issue.createdAt,
       closed_at: issue.closedAt,
+    };
+  }
+  private reviewCommentJson(review: Review, comment: ReviewComment) {
+    const { resolved, ...fields } = comment;
+    return {
+      ...fields,
+      user: USER,
+      resolver: resolved ? USER : null,
+      html_url: `${this.url(`/pulls/${review.issue}`)}#issuecomment-${comment.id}`,
+      pull_request_review_id: review.id,
     };
   }
   private commentJson(comment: Comment) {
@@ -413,12 +476,76 @@ export class FakeForgejo {
       });
     }
 
+    if (route === 'GET /commits') {
+      const reachable = (sha: string | null) => {
+        const seen = new Set<string>();
+        const queue = sha ? [sha] : [];
+        for (let next = queue.pop(); next !== undefined; next = queue.pop()) {
+          if (seen.has(next)) continue;
+          seen.add(next);
+          queue.push(...(this.commits.get(next)?.parents ?? []));
+        }
+        return seen;
+      };
+      const excluded = reachable(url.searchParams.get('not'));
+      const listed = [...reachable(url.searchParams.get('sha'))].filter(sha => !excluded.has(sha));
+      return this.page(
+        url,
+        listed.map(sha => ({ sha }))
+      );
+    }
+    match = /^GET \/raw\/(.+)$/.exec(route);
+    if (match) {
+      const path = match[1].split('/').map(decodeURIComponent).join('/');
+      const content = this.rawFiles.get(`${url.searchParams.get('ref')}:${path}`);
+      return content === undefined ? notFound : new Response(content);
+    }
+    match = /^GET \/pulls\/(\d+)\/reviews$/.exec(route);
+    if (match) {
+      const number = Number(match[1]);
+      const rows = this.reviews.filter(review => review.issue === number);
+      return this.page(
+        url,
+        rows.map(({ id, state }) => ({ id, state }))
+      );
+    }
+    match = /^(GET|POST) \/pulls\/(\d+)\/reviews\/(\d+)\/comments$/.exec(route);
+    if (match) {
+      const review = this.reviews.find(
+        candidate => candidate.issue === Number(match?.[2]) && candidate.id === Number(match?.[3])
+      );
+      if (!review) return notFound;
+      if (match[1] === 'POST') {
+        const added = this.addReviewComment(review, {
+          body: String(body.body),
+          path: String(body.path),
+          position: Number(body.old_position) > 0 ? 0 : Number(body.new_position),
+          original_position: Number(body.old_position),
+          extra_lines_count: Number(body.extra_lines_count ?? 0),
+        });
+        return Response.json(this.reviewCommentJson(review, added));
+      }
+      // Like Forgejo, which reads them from a map, the comments come in no fixed order.
+      return Response.json(
+        [...review.comments].reverse().map(comment => this.reviewCommentJson(review, comment))
+      );
+    }
+    match = /^GET \/pulls\/(\d+)\/files$/.exec(route);
+    if (match) {
+      const pull = this.issues.find(issue => issue.number === Number(match?.[1]))?.pull;
+      return pull ? this.page(url, pull.files ?? []) : notFound;
+    }
+    match = /^GET \/pulls\/(\d+)\.diff$/.exec(route);
+    if (match) {
+      const pull = this.issues.find(issue => issue.number === Number(match?.[1]))?.pull;
+      return pull ? new Response(pull.diff ?? '') : notFound;
+    }
+
     match = /^GET \/commits\/([^/]+)\/statuses$/.exec(route);
     if (match) {
       // Oldest first: a live Forgejo does not list statuses newest first, so neither does this.
       const rows = (this.statuses.get(match[1]) ?? []).map(status => ({
         ...status,
-        target_url: 'https://ci.example.com/pipeline/1',
         description: '',
         created_at: '2026-11-18T10:00:00+13:00',
       }));

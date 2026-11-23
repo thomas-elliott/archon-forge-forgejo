@@ -2,6 +2,10 @@
  * Checks on one commit, read from Forgejo's commit statuses (which Woodpecker
  * reports). `checks.state` reads them at a pull request's head, `checks.commit`
  * at a given revision or at the default branch's head.
+ *
+ * A status that links to a Woodpecker pipeline can be re-run. Its rerun identity is
+ * its context, and its attempt the pipeline's number: Woodpecker re-runs a pipeline
+ * as a new one with a higher number, which reports under the same contexts.
  */
 
 import type { RepoRef } from '@archon/forge';
@@ -12,21 +16,34 @@ import {
   summarizeChecks,
 } from '@archon/forge/operations';
 import { z } from 'zod';
-import { branchHead, type ForgejoApi, pages, repoUrl, request } from './api';
+import { branchHead, defaultBranch, type ForgejoApi, pages, repoUrl } from './api';
+import { readPull } from './pulls';
 
 // Forgejo names the state `status`; `id` is the status's index on its commit.
 const statusSchema = z.object({
   id: z.number().int(),
   context: z.string().min(1),
   status: z.string().min(1),
+  target_url: z.string().nullish(),
 });
-type Status = z.infer<typeof statusSchema>;
+export type Status = z.infer<typeof statusSchema>;
+
+/** The Woodpecker pipeline a status links to: `{origin}/repos/{repo}/pipeline/{number}[/{workflow}]`. */
+export function linkedPipeline(
+  status: Status
+): { origin: string; repo: number; number: number } | null {
+  if (!status.target_url || !URL.canParse(status.target_url)) return null;
+  const url = new URL(status.target_url);
+  const match = /^\/repos\/([1-9]\d*)\/pipeline\/([1-9]\d*)(?:\/\d+)?\/?$/.exec(url.pathname);
+  if (!match) return null;
+  return { origin: url.origin, repo: Number(match[1]), number: Number(match[2]) };
+}
 
 /**
  * Forgejo's states: `pending` is pending, `success` green, `error` and `failure`
  * red. `warning` and anything else are unknown, with the native value kept.
  */
-function observation(status: Status): CheckObservation {
+export function observation(status: Status): CheckObservation {
   const unit = { kind: 'commit_status' as const, id: String(status.id), name: status.context };
   const native = { unit, nativeState: status.status, nativeResult: status.status };
   switch (status.status) {
@@ -45,7 +62,11 @@ function observation(status: Status): CheckObservation {
 }
 
 /** The latest status of each context on `revision`; a later status has a higher id. */
-async function readCommitChecks(api: ForgejoApi, repo: RepoRef, revision: string) {
+export async function latestStatuses(
+  api: ForgejoApi,
+  repo: RepoRef,
+  revision: string
+): Promise<Map<string, Status>> {
   const statuses = await pages(
     api,
     repoUrl(api, repo, `/commits/${encodeURIComponent(revision)}/statuses`),
@@ -56,24 +77,28 @@ async function readCommitChecks(api: ForgejoApi, repo: RepoRef, revision: string
     const seen = latest.get(status.context);
     if (!seen || status.id > seen.id) latest.set(status.context, status);
   }
-  const units = [...latest.values()].map(status => ({ ...observation(status), rerun: null }));
+  return latest;
+}
+
+async function readCommitChecks(api: ForgejoApi, repo: RepoRef, revision: string) {
+  const latest = await latestStatuses(api, repo, revision);
+  const units = [...latest.values()].map(status => {
+    const pipeline = linkedPipeline(status);
+    return {
+      ...observation(status),
+      rerun: pipeline ? { id: status.context, attempt: pipeline.number } : null,
+    };
+  });
   // Forgejo says nothing about which checks are required or awaiting approval.
   return { units, summary: summarizeChecks(units), approvalPending: null };
 }
-
-const pullHeadSchema = z.object({ head: z.object({ sha: z.string().min(1) }) });
 
 export async function checksState(
   req: Extract<ForgeRequest, { op: 'checks.state' }>,
   api: ForgejoApi
 ): Promise<ForgeResponse> {
   const { ref } = req;
-  const pull = await request(
-    api,
-    repoUrl(api, ref.repo, `/pulls/${String(ref.number)}`),
-    pullHeadSchema
-  );
-  const revision = pull.head.sha;
+  const revision = (await readPull(api, ref)).head.sha;
   return {
     operationId: req.operationId,
     ok: true,
@@ -89,8 +114,6 @@ export async function checksState(
   };
 }
 
-const repositorySchema = z.object({ default_branch: z.string().min(1) });
-
 export async function checksCommit(
   req: Extract<ForgeRequest, { op: 'checks.commit' }>,
   api: ForgejoApi
@@ -99,7 +122,7 @@ export async function checksCommit(
   if (req.at.kind === 'revision') {
     at = { branch: null, revision: req.at.revision };
   } else {
-    const { default_branch: branch } = await request(api, repoUrl(api, req.repo), repositorySchema);
+    const branch = await defaultBranch(api, req.repo);
     at = { branch, revision: await branchHead(api, req.repo, branch) };
   }
   return {

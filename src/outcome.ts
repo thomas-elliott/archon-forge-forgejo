@@ -7,8 +7,9 @@
  * acknowledged write whose read-back disagrees is a verification failure that
  * says what may remain on the forge.
  *
- * `workitem.close` is the one exception: a reason label goes on before the close,
- * so it submits two requests and records the progress of each in turn.
+ * Two operations submit more than one request and record the progress of each in
+ * turn: `workitem.close` puts a reason label on before the close, and
+ * `checks.rerun` restarts each pipeline it was asked about.
  */
 
 import {
@@ -24,6 +25,7 @@ import {
   type landedSchema,
   mutationAttempt,
   mutationTarget,
+  type SelectedCheck,
 } from '@archon/forge/operations';
 import type { z } from 'zod';
 import { errorDetail, ForgejoError } from './api';
@@ -74,18 +76,17 @@ export function unverified(
     label?: ForgeLabelRecord;
     /** The commit a merge landed as, so far as the read-back showed it. */
     landed?: z.infer<typeof landedSchema>;
+    /** The checks a rerun had already re-run, each at its new attempt. */
+    rerun?: SelectedCheck[];
   } = {}
 ): ForgeResponse {
-  const attempt = mutationAttempt(request);
   return failure(
     request,
     { kind: 'invalid_response', message },
     {
       op: request.op,
       target: mutationTarget(request),
-      ...(attempt.merge && observed.landed
-        ? { merge: { ...attempt.merge, landed: observed.landed } }
-        : attempt),
+      ...attemptEvidence(request, observed),
       outcome: 'verification_failed',
       leaveBehind,
       ...(observed.pr ? { observed: observed.pr } : {}),
@@ -94,6 +95,18 @@ export function unverified(
       ...(observed.label ? { label: observed.label } : {}),
     }
   );
+}
+
+function attemptEvidence(
+  request: ForgeMutationRequest,
+  observed: { landed?: z.infer<typeof landedSchema>; rerun?: SelectedCheck[] }
+) {
+  const attempt = mutationAttempt(request);
+  if (attempt.merge && observed.landed)
+    return { merge: { ...attempt.merge, landed: observed.landed } };
+  if (attempt.rerun && observed.rerun)
+    return { rerun: { ...attempt.rerun, observed: observed.rerun } };
+  return attempt;
 }
 
 /** A confirmed write, validated against the protocol schema before it leaves the plugin. */
