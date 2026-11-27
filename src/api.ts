@@ -229,8 +229,10 @@ export async function pages<T>(api: ForgejoApi, url: string, row: z.ZodType<T>):
 export function errorDetail(cause: unknown): ForgeError {
   if (cause instanceof ForgejoError) return cause.detail;
   if (cause instanceof z.ZodError) {
+    // The answer did not match the contract's shape, which is `invalid_response`, as this plugin
+    // reports it everywhere else — not a refusal of the request that was sent.
     return {
-      kind: 'forge_error',
+      kind: 'invalid_response',
       message: `Forgejo API response did not match its documented shape: ${cause.issues[0]?.message ?? 'invalid response'}`,
     };
   }
