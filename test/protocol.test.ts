@@ -138,10 +138,17 @@ describe('resolve', () => {
     ['https://forgejo.example.com/owner/repo', 'forgejo.example.com'],
     ['http://forgejo.example.com:3000/owner/repo.git', 'forgejo.example.com:3000'],
     ['ssh://git@forgejo.example.com/owner/repo.git', 'forgejo.example.com'],
-    ['ssh://git@forgejo.example.com:2222/owner/repo.git', 'forgejo.example.com:2222'],
+    ['ssh://git@forgejo.example.com:2222/owner/repo.git', 'forgejo.example.com'],
     ['git@forgejo.example.com:owner/repo.git', 'forgejo.example.com'],
   ])('%s resolves to %s', async (remote, host) => {
     expect(await resolve(remote)).toMatchObject(resolved(host));
+  });
+
+  test('an SSH port is transport, so it is not part of the resolved host', async () => {
+    // The API is served beside the web UI, at a port the SSH remote says nothing about.
+    expect(await resolve('ssh://git@forgejo.example.com:2222/owner/repo.git')).toMatchObject(
+      resolved('forgejo.example.com')
+    );
   });
 
   test.each([
