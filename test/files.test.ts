@@ -114,6 +114,23 @@ describe('pr.files', () => {
     });
   });
 
+  test('an answer that does not match the contract is invalid_response, not a refusal', async () => {
+    fake.addPull({ head: 'feature', headSha: HEAD, files: [] });
+    const wrongShape: Fetch = async (url, init) => {
+      const response = await fetch(url, init);
+      // `state` is required on a pull request; an answer without it is not the document asked for.
+      if (url.includes('/pulls/1') && !url.includes('/files'))
+        return Response.json({ number: 1, title: 'wrong shape' });
+      return response;
+    };
+    const response = await call(
+      fake,
+      { op: 'pr.view', selector: { kind: 'number', ref: { repo: fake.repo, number: 1 } } },
+      wrongShape
+    );
+    expect(response).toMatchObject({ ok: false, error: { kind: 'invalid_response' } });
+  });
+
   test('fails rather than mixing two heads when a push lands during the read', async () => {
     const issue = fake.addPull({ head: 'feature', headSha: HEAD, files: [] });
     const pushDuringRead: Fetch = async (url, init) => {
