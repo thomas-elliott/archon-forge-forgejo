@@ -8,6 +8,15 @@
 import { parseRemoteUrl, type RepoRef } from '@archon/forge';
 import { invalidRequest, repositoryPath } from './api';
 
+/**
+ * The host the API lives on. An SSH remote's port is its transport, not the web port, so it is
+ * dropped: Forgejo serves its API beside the web UI, which `ssh://git@host:2222/owner/repo.git`
+ * says nothing about. An `http`/`https` remote's port is the web port, so it stays.
+ */
+function apiHost(url: URL, host: string): string {
+  return url.protocol === 'ssh:' ? host.replace(/:\d+$/, '') : host;
+}
+
 function parseUrlRemote(value: string): RepoRef | null {
   let parsed: ReturnType<typeof parseRemoteUrl>;
   try {
@@ -24,7 +33,7 @@ function parseUrlRemote(value: string): RepoRef | null {
     throw invalidRequest('Forgejo remote must not contain a query or fragment');
   const repository = repositoryPath(decodeURIComponent(pathname));
   if (!repository) return null;
-  return { host, path: `${repository.owner}/${repository.repo}` };
+  return { host: apiHost(url, host), path: `${repository.owner}/${repository.repo}` };
 }
 
 export function parseRemote(remote: string | null): RepoRef | null {
